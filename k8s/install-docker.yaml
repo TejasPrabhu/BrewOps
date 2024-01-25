@@ -1,0 +1,52 @@
+---
+- name: Install and start Docker, install kubectl, and install AWS CLI
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Check if Docker is already installed
+      command: docker --version
+      register: docker_version
+      failed_when: docker_version.rc != 0 and 'is not installed' not in docker_version.stderr
+      changed_when: false
+
+    - name: Update apt cache
+      apt: update_cache=yes
+      when: docker_version.rc != 0
+
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+      when: docker_version.rc != 0
+
+    - name: Start Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+      when: docker_version.rc != 0
+
+    - name: Check if kubectl is already installed
+      command: kubectl version --client --short
+      register: kubectl_version
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Install kubectl
+      get_url:
+        url: "https://storage.googleapis.com/kubernetes-release/release/v1.23.6/bin/linux/amd64/kubectl"
+        dest: "/usr/local/bin/kubectl"
+        mode: '0755'
+      when: kubectl_version is defined and kubectl_version.rc != 0
+
+    - name: Ensure pip is installed (Python 3)
+      apt:
+        name: python3-pip
+        state: present
+
+    - name: Install AWS CLI version 2 using pip
+      pip:
+        name: awscli
+        state: present
+      when: ansible_facts['distribution'] == 'Ubuntu'

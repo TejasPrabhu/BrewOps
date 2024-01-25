@@ -1,0 +1,68 @@
+name: Continuous Deployment DEV QA
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # - name: Install Docker
+      #   run: |
+      #     if ! docker --version; then
+      #       sudo apt-get update
+      #       sudo apt-get install -y docker.io
+      #       sudo systemctl start docker
+      #       sudo systemctl enable docker
+      #     else
+      #       echo "Docker is already installed."
+      #     fi
+
+      - name: Log in to Docker Hub with sudo
+        run: echo "${{ secrets.DOCKERHUB_ACCESS_TOKEN }}" | sudo docker login --username ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+
+      - name: Build Docker image with sudo
+        run: |
+          sudo docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/coffee-project-${{ github.ref_name }}:${{ github.sha }} -f ./coffee_project/Dockerfile ./coffee_project
+
+      - name: Push Docker image with sudo
+        run: |
+          sudo docker push ${{ secrets.DOCKERHUB_USERNAME }}/coffee-project-${{ github.ref_name }}:${{ github.sha }}
+
+      # - name: Install kubectl
+      #   uses: azure/setup-kubectl@v2.0
+      #   with:
+      #     version: "v1.23.6"
+      #   id: install
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Update kube config
+        run: aws eks update-kubeconfig --name devops-${{ github.ref_name }}
+
+      - name: Replace image tag in the Kubernetes deployment file
+        run: |
+          sed -i 's|${IMAGE_TAG}|'"${{ github.sha }}"'|' ./k8s/deployment-develop-main.yaml
+          sed -i 's|${REPLICAS}|'"2"'|' ./k8s/deployment-develop-main.yaml
+          sed -i 's|${REPO}|'"${{ github.ref_name }}"'|' ./k8s/deployment-develop-main.yaml
+
+      - name: Deploy to EKS
+        run: |
+          kubectl apply -f k8s/deployment-develop-main.yaml
+          kubectl apply -f k8s/service.yaml
+
+      - name: Get External IP of LoadBalancer
+        run: |
+          IP=$(kubectl get svc coffee-app-service -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "LoadBalancer External IP: $IP"

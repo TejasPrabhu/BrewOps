@@ -1,0 +1,125 @@
+- name: Set up Kubernetes
+  hosts: dev
+  become: true
+  become_user: root
+  tasks:
+    - name: Install dependencies for apt-key
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+
+    - name: Add Kubernetes GPG key
+      ansible.builtin.apt_key:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        state: present
+
+    - name: Add Kubernetes Repository
+      ansible.builtin.apt_repository:
+        repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+        state: present
+        filename: kubernetes
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+
+    - name: Check if kubeadm is installed
+      command: kubeadm version
+      register: kubeadm_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Install Kubernetes components
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+      when: kubeadm_check.rc != 0
+
+    - name: Disable Swap
+      command: swapoff -a
+      ignore_errors: yes
+
+    - name: Check if Kubernetes cluster is initialized
+      command: kubectl cluster-info
+      register: kube_cluster_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Initialize Kubernetes Cluster
+      command: kubeadm init
+      run_once: true
+      when: kube_cluster_check.rc != 0
+
+    - name: Create .kube directory for tprabhu2
+      file:
+        path: "/home/tprabhu2/.kube"
+        state: directory
+        owner: "tprabhu2"
+        group: "tprabhu2"
+      become: true
+      when: not kube_cluster_check.rc == 0
+
+    - name: Copy admin.conf to tprabhu2's kube config
+      copy:
+        src: "/etc/kubernetes/admin.conf"
+        dest: "/home/tprabhu2/.kube/config"
+        remote_src: yes
+        owner: "tprabhu2"
+        group: "tprabhu2"
+      become: true
+      when: not kube_cluster_check.rc == 0
+
+    - name: Install Calico CNI Plugin
+      become: true
+      command: kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+
+    - name: Check if Istio is installed
+      command: istioctl version --remote=false
+      register: istio_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Install Istio CLI
+      get_url:
+        url: https://istio.io/downloadIstio
+        dest: /tmp/downloadIstio.sh
+        mode: '0755'
+      when: istio_check.rc != 0
+
+    - name: Execute Istio Installation Script
+      command: /tmp/downloadIstio.sh
+      args:
+        chdir: /tmp
+      environment:
+        ISTIO_VERSION: 1.12.1
+      when: istio_check.rc != 0
+
+    - name: Move Istioctl to System Path
+      become: true
+      command: mv /tmp/istio-1.12.1/bin/istioctl /usr/local/bin/
+      when: istio_check.rc != 0
+
+    - name: Install Istio on Kubernetes
+      become: true
+      command: istioctl install --set profile=default -y
+      when: istio_check.rc != 0
+
+    - name: Label the namespace to inject Envoy sidecars
+      command: kubectl label namespace default istio-injection=enabled
+      run_once: true
+      when: istio_check.rc != 0

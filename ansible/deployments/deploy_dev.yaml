@@ -1,0 +1,56 @@
+---
+- name: Deploy Coffee Project to Development Environment
+  hosts: all
+  become: true
+  vars:
+    dockerhub_username: "{{ dockerhub_username }}"
+    dockerhub_pat: "{{ dockerhub_pat }}"
+    image_tag: "{{ image_tag }}"
+  tasks:
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install Docker
+      ansible.builtin.apt:
+        name: docker.io
+        state: present
+
+    - name: Ensure Docker service is started and enabled
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Log in to Docker Hub
+      command: echo "{{ dockerhub_pat }}" | docker login --username {{ dockerhub_username }} --password-stdin
+
+    - name: Install pip
+      ansible.builtin.apt:
+        name: python3-pip
+        state: present
+      when: ansible_python.version.major == 3
+
+    - name: Install Docker SDK for Python
+      ansible.builtin.pip:
+        name: docker
+        state: present
+
+    - name: Pull the latest Docker image
+      docker_image:
+        name: "{{ dockerhub_username }}/coffee-project-dev"
+        tag: "{{ image_tag }}"
+        source: pull
+
+    - name: Run the Docker container
+      docker_container:
+        name: coffee-app
+        image: "{{ dockerhub_username }}/coffee-project-dev:{{ image_tag }}"
+        state: started
+        published_ports:
+          - "80:3000"
+        restart_policy: always
+        recreate: true
+        pull: true

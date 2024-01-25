@@ -1,0 +1,7 @@
+all:
+    children:
+        runner:
+            hosts:
+                152.7.177.29:
+                    ansible_user: trsatra
+                    ansible_python_interpreter: / usr/bin/python3

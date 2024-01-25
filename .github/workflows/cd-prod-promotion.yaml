@@ -1,0 +1,50 @@
+name: Continuous Deployment Release
+
+on:
+  push:
+    branches:
+      - release
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v2.0
+        with:
+          version: "v1.23.6"
+        id: install
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Update kube config
+        run: aws eks update-kubeconfig --name devops-release
+
+      - name: Replace image tag in the Kubernetes deployment file
+        run: |
+          sed -i 's|${REPO_NAME}|'"coffee-project-${{ github.ref_name }}"'|' ./k8s/deployment-release-canary.yaml
+          sed -i 's|${REPO_NAME}|'"coffee-project-${{ github.ref_name }}"'|' ./k8s/deployment-release-stable.yaml
+
+      - name: Promote Canary release if Approved
+        if: ${{ job.status == 'success' }}
+        run: |
+          sed -i 's|${IMAGE_TAG}|'"${{ github.sha }}"'|' ./k8s/deployment-release-canary.yaml
+          sed -i 's|${CANARY_REPLICAS}|'"4"'|' ./k8s/deployment-release-canary.yaml
+          sed -i 's|${STABLE_REPLICAS}|'"0"'|' ./k8s/deployment-release-stable.yaml
+          kubectl apply -f k8s/deployment-release-canary.yaml
+          kubectl apply -f k8s/deployment-release-stable.yaml
+          kubectl apply -f k8s/service.yaml
+
+      - name: Get External IP of LoadBalancer
+        run: |
+          IP=$(kubectl get svc coffee-app-service -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "LoadBalancer External IP: $IP"

@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coffee-app-stable
+spec:
+  replicas: ${STABLE_REPLICAS}
+  selector:
+    matchLabels:
+      app: coffee-app
+      version: stable
+  template:
+    metadata:
+      labels:
+        app: coffee-app
+        version: stable
+    spec:
+      containers:
+      - name: coffee-app
+        image: tejasprabhu/${REPO_NAME}:${IMAGE_TAG}
+        ports:
+        - containerPort: 3000

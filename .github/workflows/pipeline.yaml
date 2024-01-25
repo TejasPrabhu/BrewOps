@@ -1,0 +1,49 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - release
+      - "feature/*"
+  pull_request:
+    branches:
+      - main
+      - develop
+      - release
+    types:
+      - opened
+      - reopened
+
+jobs:
+  build:
+    runs-on: self-hosted
+    strategy:
+      matrix:
+        node-version: [14.x, 16.x, 18.x]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v2
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install Dependencies
+        run: npm ci
+        working-directory: ${{ github.workspace }}/coffee_project
+
+      - name: Linting Check
+        run: npm run lint
+        working-directory: ${{ github.workspace }}/coffee_project
+
+      - name: Run Tests
+        run: npm test -- --coverage
+        working-directory: ${{ github.workspace }}/coffee_project
+
+      - name: Check for Vulnerabilities
+        run: npm audit
+        continue-on-error: true
+        working-directory: ${{ github.workspace }}/coffee_project
